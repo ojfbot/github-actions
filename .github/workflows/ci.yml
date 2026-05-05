@@ -1,0 +1,28 @@
+name: CI — Validate Actions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-actions:
+    name: Lint composite actions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate skill-audit/action.yml exists
+        run: |
+          test -f skill-audit/action.yml
+          test -x skill-audit/pr-skill-audit.sh
+
+      - name: Validate reusable-workflow YAML
+        run: |
+          test -f .github/workflows/security-scan.yml
+
+      - name: Shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          scandir: ./skill-audit
