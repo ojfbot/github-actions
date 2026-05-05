@@ -202,6 +202,36 @@ local_audit() {
       "$TOOL_TELEMETRY_FILE" 2>/dev/null || true)
   fi
 
+  # Coverage credit: if a sibling <!-- skill-usage-report --> comment carries
+  # the <!-- has-investigation --> sub-marker, the bead-session hook embedded
+  # an /investigate report on this PR. Credit /investigate even when the
+  # telemetry/daily branch is stale (worst case: cron missed last sleep
+  # window). bead-session.sh writes the sub-marker only when the per-session
+  # ~/.claude/last-investigation-${SESSION_ID}.md file exists.
+  local already_has_investigate=false
+  for s in "${USED_SKILLS[@]}"; do
+    case "$s" in /investigate|/investigate:*) already_has_investigate=true ;; esac
+  done
+  if [[ "$already_has_investigate" == "false" ]]; then
+    if gh pr view "$PR_NUMBER" --json comments --jq \
+      '.comments[].body' 2>/dev/null | grep -q '<!-- has-investigation -->'; then
+      USED_SKILLS+=("/investigate")
+    fi
+  fi
+
+  # Normalize namespaced skill names (e.g. "/adr:adr" → "/adr") so that
+  # downstream coverage matchers (which compare against base names) credit
+  # the skill correctly. Keep the original entry too — display in "Skills
+  # used" preserves the namespaced form.
+  local normalized=()
+  for s in "${USED_SKILLS[@]}"; do
+    normalized+=("$s")
+    case "$s" in
+      /*:*) normalized+=("/${s#/*:}") ;;
+    esac
+  done
+  USED_SKILLS=("${normalized[@]}")
+
   # Deduplicate
   if [[ ${#USED_SKILLS[@]} -gt 0 ]]; then
     USED_SKILLS=($(printf '%s\n' "${USED_SKILLS[@]}" | sort -u))
