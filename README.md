@@ -4,7 +4,7 @@ Shared GitHub Actions and reusable workflows for the ojfbot fleet.
 
 Pre-existing problem: ~7 workflow YAML files were duplicated across 14+ repos in the ojfbot cluster (`ci.yml`, `security-scan.yml`, `claude-skill-audit.yml`, `claude-code-review.yml`, `browser-automation-tests.yml`, `deploy.yml`, etc.). Updates required touching every consumer; drift was inevitable. The `claude-skill-audit.yml` workflow specifically was broken on consumer repos because the script it ran (`pr-skill-audit.sh`) lived in `ojfbot/core` and was symlinked into consumers — symlinks pointing outside the repo are gitignored, so CI runners never had the script.
 
-This repo is the durable fix. See [ADR-0055](https://github.com/ojfbot/core/blob/main/decisions/adr/0055-shared-github-actions-repo.md) for the architectural rationale.
+This repo is the durable fix. See [ADR-0067](https://github.com/ojfbot/core/blob/main/decisions/adr/0067-shared-github-actions-repo.md) for the architectural rationale.
 
 ## Layout
 

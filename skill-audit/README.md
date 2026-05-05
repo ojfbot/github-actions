@@ -50,6 +50,6 @@ The consumer workflow must grant:
 
 ## Source of truth
 
-The script `pr-skill-audit.sh` lives here, in this repo. Previously it lived in `ojfbot/core/scripts/hooks/pr-skill-audit.sh` and was symlinked into consumer repos by `install-agents.sh` — but symlinks pointing outside the repo are gitignored, so CI runners never had the script. See ADR-0055 in `ojfbot/core/decisions/adr/`.
+The script `pr-skill-audit.sh` lives here, in this repo. Previously it lived in `ojfbot/core/scripts/hooks/pr-skill-audit.sh` and was symlinked into consumer repos by `install-agents.sh` — but symlinks pointing outside the repo are gitignored, so CI runners never had the script. See ADR-0067 in `ojfbot/core/decisions/adr/`.
 
 When updating the audit logic, edit `pr-skill-audit.sh` here, tag a new release, and update the consumer pin from `@v1` to `@v2` if the change is breaking.
