@@ -145,13 +145,38 @@ heuristic_audit() {
 local_audit() {
   USED_SKILLS=()
 
-  # Get PR creation time range from commits
+  # Get PR time window for filtering telemetry events.
+  #
+  # Prior implementation used [first_commit_ts, last_commit_ts] which produced
+  # a zero-width window for single-commit PRs. The user typically invokes
+  # skills BEFORE the commit (e.g. /grill-with-docs, /plan-feature during
+  # prep), so the window must extend backward to capture them.
+  #
+  # New window:
+  #   from = first_commit_ts - 24h (default lookback for prep work)
+  #   to   = max(last_commit_ts, NOW) — covers in-progress PRs
+  #
+  # Override via env: PR_AUDIT_LOOKBACK_HOURS (default 24).
   PR_FIRST_COMMIT_TS=$(gh pr view "$PR_NUMBER" --json commits -q '.commits[0].committedDate' 2>/dev/null || echo "")
   PR_LAST_COMMIT_TS=$(gh pr view "$PR_NUMBER" --json commits -q '.commits[-1].committedDate' 2>/dev/null || echo "")
 
   if [[ -z "$PR_FIRST_COMMIT_TS" || -z "$PR_LAST_COMMIT_TS" ]]; then
     return
   fi
+
+  local lookback_hours="${PR_AUDIT_LOOKBACK_HOURS:-24}"
+  local window_from window_to
+  # Prep-work lookback before first commit
+  if [[ "$(uname)" == "Darwin" ]]; then
+    window_from=$(date -u -j -v-${lookback_hours}H -f "%Y-%m-%dT%H:%M:%SZ" "$PR_FIRST_COMMIT_TS" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "$PR_FIRST_COMMIT_TS")
+  else
+    window_from=$(date -u -d "$PR_FIRST_COMMIT_TS - ${lookback_hours} hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "$PR_FIRST_COMMIT_TS")
+  fi
+  window_to=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Export for downstream tool/session summaries
+  PR_WINDOW_FROM="$window_from"
+  PR_WINDOW_TO="$window_to"
 
   # Primary source: skill-telemetry.jsonl
   if [[ -f "$SKILL_TELEMETRY_FILE" && -s "$SKILL_TELEMETRY_FILE" ]]; then
@@ -160,8 +185,8 @@ local_audit() {
       if [[ -n "$skill" ]]; then
         USED_SKILLS+=("/$skill")
       fi
-    done < <(jq -c --arg repo "$REPO" --arg from "$PR_FIRST_COMMIT_TS" --arg to "$PR_LAST_COMMIT_TS" \
-      'select(.repo == $repo and .ts >= $from and .ts <= $to)' \
+    done < <(jq -c --arg repo "$REPO" --arg from "$window_from" --arg to "$window_to" \
+      'select(.repo == $repo and .ts >= $from and .ts <= $to and .event == "skill:invoked")' \
       "$SKILL_TELEMETRY_FILE" 2>/dev/null || true)
   fi
 
@@ -172,7 +197,7 @@ local_audit() {
       if [[ -n "$skill" ]]; then
         USED_SKILLS+=("/$skill")
       fi
-    done < <(jq -c --arg repo "$REPO" --arg from "$PR_FIRST_COMMIT_TS" --arg to "$PR_LAST_COMMIT_TS" \
+    done < <(jq -c --arg repo "$REPO" --arg from "$window_from" --arg to "$window_to" \
       'select(.repo == $repo and .ts >= $from and .ts <= $to and .skill != "" and .skill != null)' \
       "$TOOL_TELEMETRY_FILE" 2>/dev/null || true)
   fi
@@ -192,11 +217,11 @@ tool_summary() {
   if [[ ! -f "$TOOL_TELEMETRY_FILE" || ! -s "$TOOL_TELEMETRY_FILE" ]]; then
     return
   fi
-  if [[ -z "$PR_FIRST_COMMIT_TS" || -z "$PR_LAST_COMMIT_TS" ]]; then
+  if [[ -z "${PR_WINDOW_FROM:-}" || -z "${PR_WINDOW_TO:-}" ]]; then
     return
   fi
 
-  TOOL_COUNTS=$(jq -c --arg repo "$REPO" --arg from "$PR_FIRST_COMMIT_TS" --arg to "$PR_LAST_COMMIT_TS" \
+  TOOL_COUNTS=$(jq -c --arg repo "$REPO" --arg from "$PR_WINDOW_FROM" --arg to "$PR_WINDOW_TO" \
     'select(.repo == $repo and .ts >= $from and .ts <= $to) | .tool_name' \
     "$TOOL_TELEMETRY_FILE" 2>/dev/null | sort | uniq -c | sort -rn | head -8 || true)
 
@@ -211,11 +236,11 @@ session_summary() {
   if [[ ! -f "$SESSION_TELEMETRY_FILE" || ! -s "$SESSION_TELEMETRY_FILE" ]]; then
     return
   fi
-  if [[ -z "$PR_FIRST_COMMIT_TS" || -z "$PR_LAST_COMMIT_TS" ]]; then
+  if [[ -z "${PR_WINDOW_FROM:-}" || -z "${PR_WINDOW_TO:-}" ]]; then
     return
   fi
 
-  SESSION_COUNT=$(jq -r --arg repo "$REPO" --arg from "$PR_FIRST_COMMIT_TS" --arg to "$PR_LAST_COMMIT_TS" \
+  SESSION_COUNT=$(jq -r --arg repo "$REPO" --arg from "$PR_WINDOW_FROM" --arg to "$PR_WINDOW_TO" \
     'select(.repo == $repo and .ts >= $from and .ts <= $to) | .session_id' \
     "$SESSION_TELEMETRY_FILE" 2>/dev/null | sort -u | wc -l | tr -d ' ' || echo "0")
 }
