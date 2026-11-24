@@ -21,12 +21,16 @@ runs:
       continue-on-error: true
       working-directory: ${{ github.workspace }}
       run: |
+        echo "available=false" >> "$GITHUB_OUTPUT"
         git fetch origin telemetry/daily 2>/dev/null || exit 0
         mkdir -p /tmp/telemetry
         git show origin/telemetry/daily:tool-telemetry.jsonl > /tmp/telemetry/tool-telemetry.jsonl 2>/dev/null || true
         git show origin/telemetry/daily:skill-telemetry.jsonl > /tmp/telemetry/skill-telemetry.jsonl 2>/dev/null || true
         git show origin/telemetry/daily:session-telemetry.jsonl > /tmp/telemetry/session-telemetry.jsonl 2>/dev/null || true
-        echo "available=true" >> "$GITHUB_OUTPUT"
+        # Only claim telemetry when a snapshot file actually landed.
+        if [[ -s /tmp/telemetry/tool-telemetry.jsonl || -s /tmp/telemetry/skill-telemetry.jsonl || -s /tmp/telemetry/session-telemetry.jsonl ]]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Run skill audit
       shell: bash

@@ -46,17 +46,50 @@ REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
 
 # ─── Heuristic analysis ──────────────────────────────────────────────────────
 
+# Run a gh command. On failure, record why in UNAVAILABLE (never swallow it as
+# empty input) and return non-zero. Output goes to the global GH_OUT.
+GH_OUT=""
+gh_try() {
+  local label="$1"; shift
+  local err
+  err=$(mktemp)
+  if GH_OUT=$(gh "$@" 2>"$err"); then
+    rm -f "$err"
+    return 0
+  fi
+  UNAVAILABLE+=("$label: $(head -c 200 "$err" | tr '\n' ' ')")
+  rm -f "$err"
+  GH_OUT=""
+  return 1
+}
+
 heuristic_audit() {
-  local diff_stat
-  diff_stat=$(gh pr diff "$PR_NUMBER" --stat 2>/dev/null || echo "")
-  local pr_body
-  pr_body=$(gh pr view "$PR_NUMBER" --json body -q '.body' 2>/dev/null || echo "")
-  local pr_title
-  pr_title=$(gh pr view "$PR_NUMBER" --json title -q '.title' 2>/dev/null || echo "")
-  local files_changed
-  files_changed=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null || echo "")
-  local lines_changed
-  lines_changed=$(echo "$diff_stat" | tail -1 | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo "0")
+  local pr_body="" pr_title="" files_changed="" lines_changed=0
+  HEURISTIC_UNAVAILABLE=false
+
+  if ! gh_try "gh pr diff --name-only" pr diff "$PR_NUMBER" --name-only; then
+    HEURISTIC_UNAVAILABLE=true
+  fi
+  files_changed="$GH_OUT"
+  if ! gh_try "gh pr view (title, body)" pr view "$PR_NUMBER" --json title,body; then
+    HEURISTIC_UNAVAILABLE=true
+  else
+    pr_title=$(echo "$GH_OUT" | jq -r '.title // ""')
+    pr_body=$(echo "$GH_OUT" | jq -r '.body // ""')
+  fi
+  if gh_try "gh pr view (additions, deletions)" pr view "$PR_NUMBER" --json additions,deletions; then
+    lines_changed=$(echo "$GH_OUT" | jq -r '(.additions // 0) + (.deletions // 0)')
+  else
+    HEURISTIC_UNAVAILABLE=true
+  fi
+
+  SUGGESTED_SKILLS=()
+  REASONS=()
+
+  # Without the PR data, suggesting nothing would read as "all clear".
+  if [[ "$HEURISTIC_UNAVAILABLE" == "true" ]]; then
+    return
+  fi
 
   SUGGESTED_SKILLS=()
   REASONS=()
@@ -157,10 +190,16 @@ local_audit() {
   #   to   = max(last_commit_ts, NOW) — covers in-progress PRs
   #
   # Override via env: PR_AUDIT_LOOKBACK_HOURS (default 24).
-  PR_FIRST_COMMIT_TS=$(gh pr view "$PR_NUMBER" --json commits -q '.commits[0].committedDate' 2>/dev/null || echo "")
-  PR_LAST_COMMIT_TS=$(gh pr view "$PR_NUMBER" --json commits -q '.commits[-1].committedDate' 2>/dev/null || echo "")
+  if ! gh_try "gh pr view (commits)" pr view "$PR_NUMBER" --json commits; then
+    LOCAL_UNAVAILABLE=true
+    return
+  fi
+  PR_FIRST_COMMIT_TS=$(echo "$GH_OUT" | jq -r '.commits[0].committedDate // ""')
+  PR_LAST_COMMIT_TS=$(echo "$GH_OUT" | jq -r '.commits[-1].committedDate // ""')
 
   if [[ -z "$PR_FIRST_COMMIT_TS" || -z "$PR_LAST_COMMIT_TS" ]]; then
+    UNAVAILABLE+=("gh pr view (commits): no commit dates returned")
+    LOCAL_UNAVAILABLE=true
     return
   fi
 
@@ -213,9 +252,12 @@ local_audit() {
     case "$s" in /investigate|/investigate:*) already_has_investigate=true ;; esac
   done
   if [[ "$already_has_investigate" == "false" ]]; then
-    if gh pr view "$PR_NUMBER" --json comments --jq \
-      '.comments[].body' 2>/dev/null | grep -q '<!-- has-investigation -->'; then
-      USED_SKILLS+=("/investigate")
+    if gh_try "gh pr view (comments)" pr view "$PR_NUMBER" --json comments --jq '.comments[].body'; then
+      if grep -q '<!-- has-investigation -->' <<<"$GH_OUT"; then
+        USED_SKILLS+=("/investigate")
+      fi
+    else
+      LOCAL_UNAVAILABLE=true
     fi
   fi
 
@@ -311,6 +353,8 @@ generate_report() {
         for skill in "${USED_SKILLS[@]}"; do
           echo "- \`$skill\`"
         done
+      elif [[ "$LOCAL_UNAVAILABLE" == "true" ]]; then
+        echo "_Unavailable: could not read this PR from GitHub, so skill usage is unknown._"
       else
         echo "_No skill telemetry found for this PR's time range._"
       fi
@@ -339,9 +383,21 @@ generate_report() {
         for i in "${!SUGGESTED_SKILLS[@]}"; do
           echo "- \`${SUGGESTED_SKILLS[$i]}\` — ${REASONS[$i]}"
         done
+      elif [[ "$HEURISTIC_UNAVAILABLE" == "true" ]]; then
+        echo "_Unavailable: could not read this PR from GitHub, so no suggestions were made._"
       else
         echo "_No skill suggestions for this changeset._"
       fi
+      echo ""
+    fi
+
+    if [[ ${#UNAVAILABLE[@]} -gt 0 ]]; then
+      echo "### Unavailable"
+      echo ""
+      echo "Some GitHub calls failed, so this report is incomplete:"
+      for u in "${UNAVAILABLE[@]}"; do
+        echo "- $u"
+      done
       echo ""
     fi
 
@@ -406,6 +462,9 @@ generate_json_report() {
 SUGGESTED_SKILLS=()
 REASONS=()
 USED_SKILLS=()
+UNAVAILABLE=()
+LOCAL_UNAVAILABLE=false
+HEURISTIC_UNAVAILABLE=false
 PR_FIRST_COMMIT_TS=""
 PR_LAST_COMMIT_TS=""
 TOOL_COUNTS=""

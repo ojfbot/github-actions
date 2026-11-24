@@ -29,7 +29,7 @@ Two patterns coexist:
 | Path | Type | Purpose | Consumer pattern |
 |---|---|---|---|
 | `skill-audit/` | composite | Analyze PR for skill-usage opportunities; post sticky comment | `uses: ojfbot/github-actions/skill-audit@v1` |
-| `.github/workflows/security-scan.yml` | reusable | TruffleHog + API-key grep + dist guard + pnpm audit | `uses: ojfbot/github-actions/.github/workflows/security-scan.yml@v1` |
+| `.github/workflows/security-scan.yml` | reusable | TruffleHog + API-key grep + dist guard + pnpm audit (blocking at `audit-level`; set `audit-advisory: true` for report-only) | `uses: ojfbot/github-actions/.github/workflows/security-scan.yml@v1` |
 
 ## Versioning
 

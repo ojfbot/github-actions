@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: 'high'
+      audit-advisory:
+        description: 'Advisory mode: report audit findings without failing the job. Default false (blocking).'
+        required: false
+        type: boolean
+        default: false
       skip-dependency-audit:
         description: 'Skip dependency audit (e.g. for non-pnpm repos)'
         required: false
@@ -91,7 +96,24 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit production dependencies
-        continue-on-error: true
+        env:
+          AUDIT_LEVEL: ${{ inputs.audit-level }}
+          AUDIT_ADVISORY: ${{ inputs.audit-advisory }}
         run: |
-          echo "Auditing production dependencies for vulnerabilities..."
-          pnpm audit --prod --audit-level=${{ inputs.audit-level }} || echo "WARNING: vulnerabilities found (review above)"
+          # Blocking by default: pnpm audit exits non-zero at or above AUDIT_LEVEL
+          # and that fails this step. Advisory mode is explicit and is stated in
+          # the job summary. (Tested by tests/run-tests.sh.)
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "Auditing production dependencies (level: ${AUDIT_LEVEL})..."
+          status=0
+          pnpm audit --prod --audit-level="${AUDIT_LEVEL}" || status=$?
+          if [[ "$status" -eq 0 ]]; then
+            echo "Dependency audit: no findings at or above ${AUDIT_LEVEL}." >> "$summary"
+          elif [[ "$AUDIT_ADVISORY" == "true" ]]; then
+            echo "Dependency audit: advisory mode. Findings at or above ${AUDIT_LEVEL} were reported but did not fail this job." >> "$summary"
+            echo "::warning::Dependency audit found issues at or above ${AUDIT_LEVEL} (advisory mode, not blocking)"
+            exit 0
+          else
+            echo "Dependency audit FAILED: findings at or above ${AUDIT_LEVEL} (pnpm audit exit ${status})." >> "$summary"
+          fi
+          exit "$status"
