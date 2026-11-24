@@ -92,7 +92,7 @@ if bash "$ROOT/scripts/validate-yaml.sh" "$ROOT/tests/fixtures/bad-yaml/broken.y
 else
   pass "YAML check rejects a malformed file"
 fi
-for f in two-docs-second-broken two-docs-valid; do
+for f in two-docs-second-broken two-docs-valid undefined-alias; do
   if bash "$ROOT/scripts/validate-yaml.sh" "$ROOT/tests/fixtures/bad-yaml/$f.yml" >/dev/null 2>&1; then
     fail "YAML check accepted $f (multi-document file)"
   else
@@ -117,7 +117,9 @@ fi
 W="$(mktemp -d)"
 git init -q "$W/origin" && ( cd "$W/origin" && git config user.email t@t && git config user.name t \
   && git commit -q --allow-empty -m base && git branch -M main )
-git clone -q "$W/origin" "$W/c1" 2>/dev/null
+# Clone first, then change the telemetry branch, so each check proves the
+# script really fetched the new content.
+for c in c1 c2 c3; do git clone -q "$W/origin" "$W/$c" 2>/dev/null; done
 check_fetch() { # name expected
   local name="$1" want="$2" out
   out="$(cd "$W/$name" && TELEMETRY_DIR="$W/$name-t" GITHUB_OUTPUT="$W/$name-out" bash "$FT" >/dev/null 2>&1; tail -1 "$W/$name-out")"
@@ -125,10 +127,9 @@ check_fetch() { # name expected
 }
 check_fetch c1 false   # no telemetry branch
 ( cd "$W/origin" && git checkout -q -b telemetry/daily && : > tool-telemetry.jsonl && git add . && git commit -q -m empty )
-git clone -q "$W/origin" "$W/c2" 2>/dev/null
-check_fetch c2 false   # branch exists but files are empty
+check_fetch c2 false   # branch appeared after clone, files empty
 ( cd "$W/origin" && echo '{"a":1}' > tool-telemetry.jsonl && git add . && git commit -q -m data )
-git clone -q "$W/origin" "$W/c3" 2>/dev/null
-check_fetch c3 true    # real data
+check_fetch c3 true    # data appeared after clone: only a real fetch finds it
+if [[ -s "$W/c3-t/tool-telemetry.jsonl" ]]; then pass "fetch-telemetry copied the new content"; else fail "fetch-telemetry did not copy the new content"; fi
 
 exit "$FAILS"

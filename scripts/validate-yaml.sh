@@ -9,7 +9,7 @@ for f in "$@"; do
   if [[ ! -s "$f" ]]; then
     echo "FAIL $f: missing or empty"; bad=1; continue
   fi
-  if err=$(ruby -ryaml -e 'n = Psych.parse_stream(File.read(ARGV[0])).children.size; abort("empty") if n == 0; abort("#{n} YAML documents; expected exactly 1") if n > 1' "$f" 2>&1); then
+  if err=$(ruby -ryaml -e 'n = Psych.parse_stream(File.read(ARGV[0])).children.size; abort("empty") if n == 0; abort("#{n} YAML documents; expected exactly 1") if n > 1; YAML.safe_load(File.read(ARGV[0]), aliases: true)' "$f" 2>&1); then
     echo "ok   $f"
   else
     echo "FAIL $f: $(echo "$err" | head -1)"; bad=1
