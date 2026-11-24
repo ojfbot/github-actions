@@ -17,12 +17,18 @@ jobs:
           test -f skill-audit/action.yml
           test -x skill-audit/pr-skill-audit.sh
 
-      - name: Validate reusable-workflow YAML
-        run: |
-          test -f .github/workflows/security-scan.yml
+      - name: Validate workflow and action YAML
+        run: bash scripts/validate-yaml.sh .github/workflows/*.yml skill-audit/action.yml
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Check the checks (bad input must go red)
+        run: bash tests/run-tests.sh
 
       - name: Shellcheck
         uses: ludeeus/action-shellcheck@master
         with:
           severity: error
-          scandir: ./skill-audit
+          scandir: .

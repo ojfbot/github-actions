@@ -1,0 +1,8 @@
+name: x
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+        env: { CHECK: *missing }
