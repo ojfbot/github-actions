@@ -248,7 +248,7 @@ local_audit() {
   # window). bead-session.sh writes the sub-marker only when the per-session
   # ~/.claude/last-investigation-${SESSION_ID}.md file exists.
   local already_has_investigate=false
-  for s in "${USED_SKILLS[@]}"; do
+  for s in ${USED_SKILLS[@]+"${USED_SKILLS[@]}"}; do
     case "$s" in /investigate|/investigate:*) already_has_investigate=true ;; esac
   done
   if [[ "$already_has_investigate" == "false" ]]; then
@@ -266,13 +266,13 @@ local_audit() {
   # the skill correctly. Keep the original entry too — display in "Skills
   # used" preserves the namespaced form.
   local normalized=()
-  for s in "${USED_SKILLS[@]}"; do
+  for s in ${USED_SKILLS[@]+"${USED_SKILLS[@]}"}; do
     normalized+=("$s")
     case "$s" in
       /*:*) normalized+=("/${s#/*:}") ;;
     esac
   done
-  USED_SKILLS=("${normalized[@]}")
+  USED_SKILLS=(${normalized[@]+"${normalized[@]}"})
 
   # Deduplicate
   if [[ ${#USED_SKILLS[@]} -gt 0 ]]; then
@@ -401,13 +401,18 @@ generate_report() {
       echo ""
     fi
 
-    if [[ "$MODE" == "both" && ${#SUGGESTED_SKILLS[@]} -gt 0 && ${#USED_SKILLS[@]} -ge 0 ]]; then
+    if [[ "$MODE" == "both" && ( "$LOCAL_UNAVAILABLE" == "true" || "$HEURISTIC_UNAVAILABLE" == "true" ) ]]; then
+      echo "### Coverage"
+      echo ""
+      echo "_Unknown: part of the GitHub data was unavailable, so recommended vs. used skills cannot be compared._"
+      echo ""
+    elif [[ "$MODE" == "both" && ${#SUGGESTED_SKILLS[@]} -gt 0 && ${#USED_SKILLS[@]} -ge 0 ]]; then
       echo "### Coverage"
       echo ""
       local missed=0
       for suggested in "${SUGGESTED_SKILLS[@]}"; do
         local found=false
-        for used in "${USED_SKILLS[@]}"; do
+        for used in ${USED_SKILLS[@]+"${USED_SKILLS[@]}"}; do
           if [[ "$suggested" == "$used" ]]; then
             found=true
             break
@@ -433,22 +438,35 @@ generate_report() {
 
 # ─── JSON output ─────────────────────────────────────────────────────────────
 
+# Print a JSON array of the given strings, dropping empty ones.
+json_array() {
+  printf '%s\n' "$@" | jq -R 'select(length > 0)' | jq -s .
+}
+
 generate_json_report() {
+  local unavailable=false
+  if [[ ${#UNAVAILABLE[@]} -gt 0 || "$LOCAL_UNAVAILABLE" == "true" || "$HEURISTIC_UNAVAILABLE" == "true" ]]; then
+    unavailable=true
+  fi
   jq -nc \
+    --argjson unavailable "$unavailable" \
+    --argjson unavailable_reasons "$(json_array "${UNAVAILABLE[@]:-}")" \
     --arg pr "$PR_NUMBER" \
     --arg repo "$REPO" \
     --argjson tool_calls "$TOTAL_TOOL_CALLS" \
     --argjson sessions "$SESSION_COUNT" \
     --argjson lint_fixed "$LINT_FIXED" \
     --argjson lint_regressions "$LINT_REGRESSIONS" \
-    --argjson used_skills "$(printf '%s\n' "${USED_SKILLS[@]:-}" | jq -R . | jq -s .)" \
-    --argjson suggested_skills "$(printf '%s\n' "${SUGGESTED_SKILLS[@]:-}" | jq -R . | jq -s .)" \
-    --argjson tool_breakdown "$(echo "${TOOL_COUNTS:-}" | awk '{print $2, $1}' | tr -d '"' | jq -Rn '[inputs | split(" ") | {(.[0]): (.[1] | tonumber)}] | add // {}')" \
+    --argjson used_skills "$(json_array "${USED_SKILLS[@]:-}")" \
+    --argjson suggested_skills "$(json_array "${SUGGESTED_SKILLS[@]:-}")" \
+    --argjson tool_breakdown "$(echo "${TOOL_COUNTS:-}" | awk 'NF {print $2, $1}' | tr -d '"' | jq -Rn '[inputs | split(" ") | {(.[0]): (.[1] | tonumber)}] | add // {}')" \
     '{
       pr: $pr,
       repo: $repo,
       skills_used: $used_skills,
       skills_suggested: $suggested_skills,
+      unavailable: $unavailable,
+      unavailable_reasons: $unavailable_reasons,
       tool_calls: $tool_calls,
       sessions: $sessions,
       lint_fixed: $lint_fixed,

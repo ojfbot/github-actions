@@ -107,13 +107,18 @@ jobs:
           echo "Auditing production dependencies (level: ${AUDIT_LEVEL})..."
           status=0
           pnpm audit --prod --audit-level="${AUDIT_LEVEL}" || status=$?
+          if [[ "$AUDIT_ADVISORY" == "true" ]]; then
+            if [[ "$status" -eq 0 ]]; then
+              echo "Dependency audit: advisory mode. No findings at or above ${AUDIT_LEVEL}." >> "$summary"
+            else
+              echo "Dependency audit: advisory mode (not blocking). Audit failed or found issues at or above ${AUDIT_LEVEL} (pnpm audit exit ${status})." >> "$summary"
+              echo "::warning::Dependency audit failed or found issues (advisory mode, not blocking, exit ${status})"
+            fi
+            exit 0
+          fi
           if [[ "$status" -eq 0 ]]; then
             echo "Dependency audit: no findings at or above ${AUDIT_LEVEL}." >> "$summary"
-          elif [[ "$AUDIT_ADVISORY" == "true" ]]; then
-            echo "Dependency audit: advisory mode. Findings at or above ${AUDIT_LEVEL} were reported but did not fail this job." >> "$summary"
-            echo "::warning::Dependency audit found issues at or above ${AUDIT_LEVEL} (advisory mode, not blocking)"
-            exit 0
           else
-            echo "Dependency audit FAILED: findings at or above ${AUDIT_LEVEL} (pnpm audit exit ${status})." >> "$summary"
+            echo "Dependency audit FAILED: audit failed or found issues at or above ${AUDIT_LEVEL} (pnpm audit exit ${status})." >> "$summary"
           fi
           exit "$status"
